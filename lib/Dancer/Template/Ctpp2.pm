@@ -8,10 +8,15 @@ use Dancer::FileUtils 'path';
 
 use base 'Dancer::Template::Abstract';
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 our $_ctpp2;
 our %_cfg;
+
+sub default_tmpl_ext {
+  return ($_cfg{'use_bytecode'}) ? 'ct2' : 'tmpl';
+}
+
 
 sub init {
     my ($self) = @_;
@@ -19,52 +24,45 @@ sub init {
     die "HTML::CTPP2 is needed by Dancer::Template::Ctpp2"
       unless Dancer::ModuleLoader->load('HTML::CTPP2');
     
-    my %ctpp2_cfg=();
+    %_cfg=%{$self->config};
+    my $use_bytecode = (defined $_cfg{'compiled'}) ? delete $_cfg{'compiled'} : 0;
 
-    my $source_charset = $self->config->{source_charset} || undef;
-    my $destination_charset = $self->config->{destination_charset} || undef;
-
-#    $_cfg{'include_dir'} = setting('views');
-
-    $_cfg{'compiled'} = $self->config->{compiled} || 0;
-
-    if ($source_charset && $destination_charset) {
-	$ctpp2_cfg{'source_charset'} = $source_charset;
-	$ctpp2_cfg{'destination_charset'} = $destination_charset;
-    }
-
-    my @inc = ("$_cfg{'include_dir'}");
-
-    $_ctpp2 = new HTML::CTPP2(%ctpp2_cfg);
-
+    $_ctpp2 = new HTML::CTPP2(
+	arg_stack_size      => 1024,
+	code_stack_size     => 1024,
+	steps_limit         => 1024*1024,
+	max_functions       => 1024,
+	%_cfg,
+    );
+    
+    $_cfg{'use_bytecode'} = $use_bytecode;
 }
 
 sub render($$$) {
     my ($self, $template, $tokens) = @_;
-
-    my $use_bytecode = $_cfg{'compiled'};
-
-    if ($use_bytecode) {
-        $template =~ s/tt$/ct2/g;
-    }
-
-#    Dancer::Logger->debug("use_bytecode: '".$use_bytecode."'");
 
     die "'$template' is not a regular file"
       if !ref($template) && (!-f $template);
 
     my $b;
 
-    if ($use_bytecode) {
-#	Dancer::Logger->debug("Bytecode: ".$template);
-	$b = $_ctpp2->load_bytecode($template);
+    if ($_cfg{'use_bytecode'}) {
+        $b = $_ctpp2->load_bytecode($template);
     } else {
-#        Dancer::Logger->debug("Plain: ".$template);
-   	 $b = $_ctpp2->parse_template($template);
+        $b = $_ctpp2->parse_template($template);
     }
 
+    $_ctpp2->reset();
     $_ctpp2->param($tokens);
-    return $_ctpp2->output($b);
+
+    my $result  = $_ctpp2->output($b);
+    
+    if(length(setting('charset')) && lc setting('charset') eq 'utf-8') {
+      return pack "U0C*", unpack "C*", $result;    
+    } else {
+      return $result;  
+    }
+    
 }
 
 1;
@@ -91,30 +89,27 @@ This can be done in your config.yml file or directly in your app code with the
 B<set> keyword.
 
 Since HTML::CTPP2 uses different syntax to other template engines like
-Template::Toolkit, for current Dancer versions the default layout main.tt will
+Template::Toolkit, for current Dancer versions the default layout B<main.tmpl> will
 need to be updated, changing the C<[% content %]> line to:
 
     <TMPL_var content>
-
+    
 Future versions of Dancer may ask you which template engine you wish to use, and
 write the default layout appropriately.
-
-Also, currently template filenames should end with .tt; again, future Dancer
-versions may change this requirement.
-
+    
 By default, Dancer configures HTML::CTPP2 engine to parse templates from source code
-instead of compiled templates. This can be changed 
-within your config file - for example:
-
+(template filenames with .tmpl extension) instead of compiled templates.
+This can be changed within your config file - for example:
+    
     template: ctpp2
-    engines:
-        ctpp2:
-            compiled: 1
-            source_charset: 'CP1251'
-            destination_charset: 'utf-8'
-
+        engines:
+            ctpp2:
+                compiled: 1
+                source_charset: 'CP1251'
+                destination_charset: 'utf-8'
+                                                        
 Compiled template filenames should end with .ct2.
-
+                                                        
 C<source_charset> and C<destination_charset> settings are used for on-the-fly 
 charset converting of template output. These settings are optional.
 
@@ -122,10 +117,9 @@ charset converting of template output. These settings are optional.
 
 L<Dancer>, L<HTML::CTPP2>
 
-
 =head1 AUTHOR
  
-Maxim Nikolenko, C<< <mephist@zenon.net> >>
+Maxim Nikolenko, C<< <mephist@cpan.org> >>
  
 =head1 SUPPORT
 
@@ -174,4 +168,3 @@ library itself.
   SUCH DAMAGE.
 
 =cut
-

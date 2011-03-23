@@ -4,7 +4,7 @@ use ExtUtils::MakeMaker;
 
 WriteMakefile(
     NAME                => 'Dancer::Template::Ctpp2',
-    AUTHOR              => q{Maxim Nikolenko <mephist@zenon.net>},
+    AUTHOR              => q{Maxim Nikolenko <mnikolenko@agava.com>},
     VERSION_FROM        => 'lib/Dancer/Template/Ctpp2.pm',
     ABSTRACT_FROM       => 'lib/Dancer/Template/Ctpp2.pm',
     ($ExtUtils::MakeMaker::VERSION >= 6.3002
