@@ -5,64 +5,77 @@ use warnings;
 use Dancer::Config 'setting';
 use Dancer::ModuleLoader;
 use Dancer::FileUtils 'path';
+use String::SetUTF8;
 
 use base 'Dancer::Template::Abstract';
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 our $_ctpp2;
 our %_cfg;
+our %ctpp2_cfg;
 
 sub default_tmpl_ext {
-  return ($_cfg{'use_bytecode'}) ? 'ct2' : 'tmpl';
+	return ($_cfg{'use_bytecode'}) ? 'ct2' : 'tmpl';
 }
 
 
 sub init {
-    my ($self) = @_;
+	my ($self) = @_;
 
-    die "HTML::CTPP2 is needed by Dancer::Template::Ctpp2"
-      unless Dancer::ModuleLoader->load('HTML::CTPP2');
-    
-    %_cfg=%{$self->config};
-    my $use_bytecode = (defined $_cfg{'compiled'}) ? delete $_cfg{'compiled'} : 0;
-
-    $_ctpp2 = new HTML::CTPP2(
-	arg_stack_size      => 1024,
-	code_stack_size     => 1024,
-	steps_limit         => 1024*1024,
-	max_functions       => 1024,
-	%_cfg,
-    );
-    
-    $_cfg{'use_bytecode'} = $use_bytecode;
+	die "HTML::CTPP2 is needed by Dancer::Template::Ctpp2"
+		unless Dancer::ModuleLoader->load('HTML::CTPP2');
+		
+	%_cfg=%{$self->config};
+	
+	$_cfg{use_bytecode} = (defined $_cfg{'compiled'}) ? 
+		delete $_cfg{'compiled'} : 0;
+		
+	%ctpp2_cfg = (%ctpp2_cfg, %{$self->config->{params}})
+		if $self->config->{params};
+	
+	$_ctpp2 = new HTML::CTPP2(
+		arg_stack_size      => 1024,
+		code_stack_size     => 1024,
+		steps_limit         => 1024*1024,
+		max_functions       => 1024,
+		%ctpp2_cfg,
+	) unless $_ctpp2;
 }
 
 sub render($$$) {
-    my ($self, $template, $tokens) = @_;
+	my ($self, $template, $tokens) = @_;
 
-    die "'$template' is not a regular file"
-      if !ref($template) && (!-f $template);
+	# in cases of different extensions we need to check
+	# samples: template 'index' vs template 'index.txt'
+	# template 'index' will be autoconverted to template 'index.tmpl' and
+	# template 'index.txt' to template 'index.txt.htm' without this fix.
+	$template =~ s/\.\w+?$// if !ref($template) and !-f $template;
 
-    my $b;
+	die "'$template' is not a regular file"
+		if !ref($template) && (!-f $template);
 
-    if ($_cfg{'use_bytecode'}) {
-        $b = $_ctpp2->load_bytecode($template);
-    } else {
-        $b = $_ctpp2->parse_template($template);
-    }
+	my $b;
+	if ($_cfg{'use_bytecode'}) {
+		$b = $_ctpp2->load_bytecode($template);
+	} else {
+		$b = $_ctpp2->parse_template($template);
+	}
 
-    $_ctpp2->reset();
-    $_ctpp2->param($tokens);
+	# $_ctpp2->reset(); # It's better to do this after
+	$_ctpp2->param($tokens);
+	
+	my $result = $_ctpp2->output($b);
+	
+	$_ctpp2->reset(); # we need to clear data for next cycles
+	
+	return '<font color="red"><b>[template '.$template.' error]</b></font>' 
+		if not $result and $_cfg{graceful_error}; 
+		
+	setUTF8($result) 
+		if length(setting('charset')) && lc setting('charset') eq 'utf-8';
 
-    my $result  = $_ctpp2->output($b);
-    
-    if(length(setting('charset')) && lc setting('charset') eq 'utf-8') {
-      return pack "U0C*", unpack "C*", $result;    
-    } else {
-      return $result;  
-    }
-    
+	return $result || '';
 }
 
 1;
@@ -104,6 +117,9 @@ This can be changed within your config file - for example:
     template: ctpp2
         engines:
             ctpp2:
+                extension: 'htm'
+                graceful_error: 1
+            params: 
                 compiled: 1
                 source_charset: 'CP1251'
                 destination_charset: 'utf-8'
